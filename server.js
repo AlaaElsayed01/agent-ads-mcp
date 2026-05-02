@@ -481,6 +481,15 @@ function getBaseUrl(req) {
 }
 
 // --- OAuth Metadata Discovery ---
+app.get("/.well-known/oauth-protected-resource", (req, res) => {
+  const base = getBaseUrl(req);
+  res.json({
+    resource: `${base}/mcp`,
+    authorization_servers: [base],
+    bearer_methods_supported: ["header"],
+  });
+});
+
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = getBaseUrl(req);
   res.json({
