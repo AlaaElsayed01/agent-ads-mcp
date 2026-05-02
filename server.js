@@ -528,20 +528,62 @@ app.post("/register", (req, res) => {
 });
 
 // --- Authorization Endpoint ---
+const MCP_PASSWORD = process.env.MCP_PASSWORD || "changeme";
+
 app.get("/authorize", (req, res) => {
   const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } = req.query;
   if (response_type !== "code") return res.status(400).send("Unsupported response_type");
   if (!clients.has(client_id)) return res.status(400).send("Unknown client");
 
-  // Auto-approve: generate code immediately (no login page needed for machine-to-machine)
+  const params = new URLSearchParams({ client_id, redirect_uri, state: state || "", code_challenge: code_challenge || "", code_challenge_method: code_challenge_method || "", response_type });
+  res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent-ads MCP — Login</title>
+<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
+.card{background:#1e293b;padding:2rem;border-radius:12px;width:320px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+h2{margin:0 0 .5rem;font-size:1.25rem}p{margin:0 0 1.5rem;font-size:.85rem;color:#94a3b8}
+input{width:100%;padding:.6rem;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#e2e8f0;font-size:1rem;box-sizing:border-box}
+button{width:100%;padding:.6rem;border:none;border-radius:6px;background:#3b82f6;color:#fff;font-size:1rem;cursor:pointer;margin-top:1rem}
+button:hover{background:#2563eb}.err{color:#f87171;font-size:.85rem;margin-top:.5rem;display:none}</style></head>
+<body><div class="card"><h2>🔐 agent-ads MCP</h2><p>Enter your password to authorize this connection.</p>
+<form method="POST" action="/authorize?${params}">
+<input type="password" name="password" placeholder="Password" required autofocus>
+<div class="err" id="err">Wrong password</div>
+<button type="submit">Authorize</button></form></div></body></html>`);
+});
+
+app.post("/authorize", (req, res) => {
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } = req.query;
+  const { password } = req.body;
+
+  if (password !== MCP_PASSWORD) {
+    const params = new URLSearchParams({ client_id, redirect_uri, state: state || "", code_challenge: code_challenge || "", code_challenge_method: code_challenge_method || "", response_type });
+    return res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>agent-ads MCP — Login</title>
+<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
+.card{background:#1e293b;padding:2rem;border-radius:12px;width:320px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+h2{margin:0 0 .5rem;font-size:1.25rem}p{margin:0 0 1.5rem;font-size:.85rem;color:#94a3b8}
+input{width:100%;padding:.6rem;border:1px solid #334155;border-radius:6px;background:#0f172a;color:#e2e8f0;font-size:1rem;box-sizing:border-box}
+button{width:100%;padding:.6rem;border:none;border-radius:6px;background:#3b82f6;color:#fff;font-size:1rem;cursor:pointer;margin-top:1rem}
+button:hover{background:#2563eb}.err{color:#f87171;font-size:.85rem;margin-top:.5rem}</style></head>
+<body><div class="card"><h2>🔐 agent-ads MCP</h2><p>Enter your password to authorize this connection.</p>
+<form method="POST" action="/authorize?${params}">
+<input type="password" name="password" placeholder="Password" required autofocus>
+<div class="err">Wrong password. Try again.</div>
+<button type="submit">Authorize</button></form></div></body></html>`);
+  }
+
   const code = randomUUID();
   authCodes.set(code, {
     client_id,
     redirect_uri,
     code_challenge,
     code_challenge_method,
-    expires: Date.now() + 600_000, // 10 min
+    expires: Date.now() + 600_000,
   });
+
+  // Mark client as approved
+  const client = clients.get(client_id);
+  if (client) client.approved = true;
 
   const url = new URL(redirect_uri);
   url.searchParams.set("code", code);
@@ -555,7 +597,7 @@ app.post("/token", (req, res) => {
 
   if (grant_type === "client_credentials") {
     const client = clients.get(client_id);
-    if (!client || client.client_secret !== client_secret) {
+    if (!client || client.client_secret !== client_secret || !client.approved) {
       return res.status(401).json({ error: "invalid_client" });
     }
     const access_token = randomUUID();
