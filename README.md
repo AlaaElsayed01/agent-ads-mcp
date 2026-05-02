@@ -107,7 +107,7 @@ Go to your Render service → **Environment** → add your auth key and platform
 
 | Variable | Purpose |
 |----------|---------|
-| `MCP_AUTH_KEY` | **Required.** Secret key to protect your MCP server. Pick any strong random string. |
+| `SERVER_URL` | **Required.** Your Render service URL, e.g. `https://agent-ads-mcp.onrender.com` |
 
 Then add tokens for the platforms you use:
 
@@ -199,8 +199,8 @@ https://your-service.onrender.com/health
 1. Go to [claude.ai](https://claude.ai) or open Claude Desktop
 2. **Settings** → **Connectors** → **Add custom connector**
 3. Enter URL: `https://your-service.onrender.com/mcp`
-4. For authentication, add header: `Authorization: Bearer YOUR_MCP_AUTH_KEY`
-5. Done — no restart needed
+4. Leave OAuth Client ID and Secret **empty** — the server uses Dynamic Client Registration (Claude handles it automatically)
+5. Click **Add** — Claude will complete the OAuth flow and connect
 
 ### Option B: Developer config file
 
@@ -215,10 +215,7 @@ Edit your config file:
 {
   "mcpServers": {
     "agent-ads": {
-      "url": "https://your-service.onrender.com/mcp",
-      "headers": {
-        "Authorization": "Bearer YOUR_MCP_AUTH_KEY"
-      }
+      "url": "https://your-service.onrender.com/mcp"
     }
   }
 }
@@ -234,7 +231,7 @@ Then quit Claude Desktop completely and reopen it.
 
 1. ChatGPT → **Settings** → **Connected Apps**
 2. Add connector URL: `https://your-service.onrender.com/mcp`
-3. Add authorization header: `Bearer YOUR_MCP_AUTH_KEY`
+3. ChatGPT will auto-discover OAuth endpoints and complete the flow
 3. Use `@agent-ads` in chat or select from the **+** menu
 
 ---
@@ -260,7 +257,7 @@ Then quit Claude Desktop completely and reopen it.
 
 | Topic | Detail |
 |-------|--------|
-| **Security** | Read-only. Auth key required to connect (`MCP_AUTH_KEY`). Tokens stored as Render env vars. All traffic over HTTPS. |
+| **Security** | Read-only. OAuth 2.1 authentication required to connect. Dynamic Client Registration supported. Tokens expire after 1 hour. |
 | **Token expiry** | Meta tokens can be short-lived. TikTok expires every 24h. Update in Render → Environment when needed. |
 | **Render free tier** | Sleeps after inactivity (~30s cold start). Starter plan ($7/mo) stays always-on. |
 | **No OS keychain** | Render/Docker has no keychain — tokens are read from environment variables automatically. |

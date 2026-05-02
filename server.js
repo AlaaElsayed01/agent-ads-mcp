@@ -457,37 +457,133 @@ server.tool(
 );
 } // end registerTools
 
-// --- Streamable HTTP transport for Render ---
+// --- OAuth + Streamable HTTP transport ---
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 
 const app = express();
 app.use(express.json());
-const sessions = new Map();
-const AUTH_KEY = process.env.MCP_AUTH_KEY;
+app.use(express.urlencoded({ extended: true }));
 
-function checkAuth(req, res, next) {
-  if (AUTH_KEY) {
-    const header = req.headers.authorization;
-    if (!header || header !== `Bearer ${AUTH_KEY}`) {
-      return res.status(401).json({ error: "Unauthorized" });
+const mcpSessions = new Map();
+const AUTH_SECRET = process.env.MCP_AUTH_SECRET || randomUUID();
+const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;
+
+// In-memory stores (sufficient for single-instance Render)
+const clients = new Map();   // client_id -> { client_secret, redirect_uris }
+const authCodes = new Map(); // code -> { client_id, redirect_uri, code_challenge, expires }
+const tokens = new Map();    // access_token -> { client_id, expires }
+
+// --- OAuth Metadata Discovery ---
+app.get("/.well-known/oauth-authorization-server", (_, res) => {
+  res.json({
+    issuer: SERVER_URL,
+    authorization_endpoint: `${SERVER_URL}/authorize`,
+    token_endpoint: `${SERVER_URL}/token`,
+    registration_endpoint: `${SERVER_URL}/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "client_credentials"],
+    token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
+    code_challenge_methods_supported: ["S256"],
+  });
+});
+
+// --- Dynamic Client Registration (RFC 7591) ---
+app.post("/register", (req, res) => {
+  const { redirect_uris, client_name } = req.body;
+  const client_id = randomUUID();
+  const client_secret = randomUUID();
+  clients.set(client_id, { client_secret, redirect_uris: redirect_uris || [] });
+  res.status(201).json({ client_id, client_secret, client_name, redirect_uris });
+});
+
+// --- Authorization Endpoint ---
+app.get("/authorize", (req, res) => {
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } = req.query;
+  if (response_type !== "code") return res.status(400).send("Unsupported response_type");
+  if (!clients.has(client_id)) return res.status(400).send("Unknown client");
+
+  // Auto-approve: generate code immediately (no login page needed for machine-to-machine)
+  const code = randomUUID();
+  authCodes.set(code, {
+    client_id,
+    redirect_uri,
+    code_challenge,
+    code_challenge_method,
+    expires: Date.now() + 600_000, // 10 min
+  });
+
+  const url = new URL(redirect_uri);
+  url.searchParams.set("code", code);
+  if (state) url.searchParams.set("state", state);
+  res.redirect(url.toString());
+});
+
+// --- Token Endpoint ---
+app.post("/token", (req, res) => {
+  const { grant_type, code, client_id, client_secret, redirect_uri, code_verifier } = req.body;
+
+  if (grant_type === "client_credentials") {
+    const client = clients.get(client_id);
+    if (!client || client.client_secret !== client_secret) {
+      return res.status(401).json({ error: "invalid_client" });
     }
+    const access_token = randomUUID();
+    tokens.set(access_token, { client_id, expires: Date.now() + 3600_000 });
+    return res.json({ access_token, token_type: "Bearer", expires_in: 3600 });
+  }
+
+  if (grant_type === "authorization_code") {
+    const authCode = authCodes.get(code);
+    if (!authCode || authCode.expires < Date.now()) {
+      return res.status(400).json({ error: "invalid_grant" });
+    }
+    authCodes.delete(code);
+
+    // Verify PKCE
+    if (authCode.code_challenge && code_verifier) {
+      const hash = createHash("sha256").update(code_verifier).digest("base64url");
+      if (hash !== authCode.code_challenge) {
+        return res.status(400).json({ error: "invalid_grant", error_description: "PKCE verification failed" });
+      }
+    }
+
+    const access_token = randomUUID();
+    tokens.set(access_token, { client_id: authCode.client_id, expires: Date.now() + 3600_000 });
+    return res.json({ access_token, token_type: "Bearer", expires_in: 3600 });
+  }
+
+  res.status(400).json({ error: "unsupported_grant_type" });
+});
+
+// --- Auth Middleware ---
+function checkAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  const token = header.slice(7);
+  const t = tokens.get(token);
+  if (!t || t.expires < Date.now()) {
+    tokens.delete(token);
+    return res.status(401).json({ error: "Unauthorized" });
   }
   next();
 }
 
+// --- MCP Streamable HTTP ---
 async function handleMcp(req, res) {
   const sessionId = req.headers["mcp-session-id"];
   let transport;
 
-  if (sessionId && sessions.has(sessionId)) {
-    transport = sessions.get(sessionId);
+  if (sessionId && mcpSessions.has(sessionId)) {
+    transport = mcpSessions.get(sessionId);
   } else if (!sessionId && req.method === "POST") {
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
-        sessions.set(id, transport);
-        transport.onclose = () => sessions.delete(id);
+        mcpSessions.set(id, transport);
+        transport.onclose = () => mcpSessions.delete(id);
       },
     });
     const s = new McpServer({ name: "agent-ads", version: "1.0.0" });
@@ -504,9 +600,9 @@ app.post("/mcp", checkAuth, handleMcp);
 app.get("/mcp", checkAuth, handleMcp);
 app.delete("/mcp", checkAuth, (req, res) => {
   const id = req.headers["mcp-session-id"];
-  if (id) sessions.delete(id);
+  if (id) mcpSessions.delete(id);
   res.status(200).json({ ok: true });
 });
 
-app.get("/health", (_, res) => res.json({ status: "ok", sessions: sessions.size }));
-app.listen(PORT, () => console.log(`agent-ads MCP (Streamable HTTP) on port ${PORT}`));
+app.get("/health", (_, res) => res.json({ status: "ok", sessions: mcpSessions.size }));
+app.listen(PORT, () => console.log(`agent-ads MCP (OAuth + Streamable HTTP) on port ${PORT}`));
