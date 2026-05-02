@@ -103,7 +103,13 @@ git clone https://github.com/AlaaElsayed01/agent-ads-mcp.git
 
 ### 3. Add environment variables
 
-Go to your Render service → **Environment** → add tokens for the platforms you use:
+Go to your Render service → **Environment** → add your auth key and platform tokens:
+
+| Variable | Purpose |
+|----------|---------|
+| `MCP_AUTH_KEY` | **Required.** Secret key to protect your MCP server. Pick any strong random string. |
+
+Then add tokens for the platforms you use:
 
 <details>
 <summary><strong>Meta</strong></summary>
@@ -199,7 +205,7 @@ Edit your config file:
 {
   "mcpServers": {
     "agent-ads": {
-      "url": "https://your-service.onrender.com/sse"
+      "url": "https://your-service.onrender.com/sse?key=YOUR_MCP_AUTH_KEY"
     }
   }
 }
@@ -217,7 +223,7 @@ Then:
 > Requires Business, Enterprise, or Edu plan (MCP is in beta).
 
 1. ChatGPT → **Settings** → **Connected Apps**
-2. Add connector URL: `https://your-service.onrender.com/sse`
+2. Add connector URL: `https://your-service.onrender.com/sse?key=YOUR_MCP_AUTH_KEY`
 3. Use `@agent-ads` in chat or select from the **+** menu
 
 ---
@@ -243,7 +249,7 @@ Then:
 
 | Topic | Detail |
 |-------|--------|
-| **Security** | Read-only. Never modifies your ad accounts. Tokens stored as Render env vars. |
+| **Security** | Read-only. Auth key required to connect (`MCP_AUTH_KEY`). Tokens stored as Render env vars. All traffic over HTTPS. |
 | **Token expiry** | Meta tokens can be short-lived. TikTok expires every 24h. Update in Render → Environment when needed. |
 | **Render free tier** | Sleeps after inactivity (~30s cold start). Starter plan ($7/mo) stays always-on. |
 | **No OS keychain** | Render/Docker has no keychain — tokens are read from environment variables automatically. |

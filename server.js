@@ -461,8 +461,16 @@ server.tool(
 const app = express();
 app.use(express.json());
 const sessions = {};
+const AUTH_KEY = process.env.MCP_AUTH_KEY;
 
-app.get("/sse", async (req, res) => {
+function checkAuth(req, res, next) {
+  if (AUTH_KEY && req.query.key !== AUTH_KEY) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+app.get("/sse", checkAuth, async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   sessions[transport.sessionId] = transport;
   res.on("close", () => delete sessions[transport.sessionId]);
