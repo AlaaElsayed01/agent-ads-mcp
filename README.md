@@ -194,6 +194,16 @@ https://your-service.onrender.com/health
 
 ## Connect Claude Desktop
 
+### Option A: Connectors (recommended)
+
+1. Go to [claude.ai](https://claude.ai) or open Claude Desktop
+2. **Settings** → **Connectors** → **Add custom connector**
+3. Enter URL: `https://your-service.onrender.com/mcp`
+4. For authentication, add header: `Authorization: Bearer YOUR_MCP_AUTH_KEY`
+5. Done — no restart needed
+
+### Option B: Developer config file
+
 Edit your config file:
 
 | OS | Path |
@@ -205,16 +215,16 @@ Edit your config file:
 {
   "mcpServers": {
     "agent-ads": {
-      "url": "https://your-service.onrender.com/sse?key=YOUR_MCP_AUTH_KEY"
+      "url": "https://your-service.onrender.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCP_AUTH_KEY"
+      }
     }
   }
 }
 ```
 
-Then:
-1. **Quit** Claude Desktop completely (Cmd+Q / File→Exit)
-2. Reopen it
-3. Start a new chat and ask: *"What tools do you have?"*
+Then quit Claude Desktop completely and reopen it.
 
 ---
 
@@ -223,7 +233,8 @@ Then:
 > Requires Business, Enterprise, or Edu plan (MCP is in beta).
 
 1. ChatGPT → **Settings** → **Connected Apps**
-2. Add connector URL: `https://your-service.onrender.com/sse?key=YOUR_MCP_AUTH_KEY`
+2. Add connector URL: `https://your-service.onrender.com/mcp`
+3. Add authorization header: `Bearer YOUR_MCP_AUTH_KEY`
 3. Use `@agent-ads` in chat or select from the **+** menu
 
 ---

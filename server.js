@@ -1,5 +1,4 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { execFile } from "child_process";
 import { promisify } from "util";
@@ -25,7 +24,7 @@ function parseCommand(str) {
   return (str.match(/(?:[^\s"]+|"[^"]*")+/g) || []).map((a) => a.replace(/^"|"$/g, ""));
 }
 
-const server = new McpServer({ name: "agent-ads", version: "1.0.0" });
+function registerTools(server) {
 
 const SKILL_DOC = `# agent-ads Full Command Reference
 
@@ -456,32 +455,58 @@ server.tool(
     return { content: [{ type: "text", text: await run(a) }] };
   }
 );
+} // end registerTools
 
-// --- SSE transport for Render ---
+// --- Streamable HTTP transport for Render ---
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { randomUUID } from "crypto";
+
 const app = express();
 app.use(express.json());
-const sessions = {};
+const sessions = new Map();
 const AUTH_KEY = process.env.MCP_AUTH_KEY;
 
 function checkAuth(req, res, next) {
-  if (AUTH_KEY && req.query.key !== AUTH_KEY) {
-    return res.status(401).json({ error: "Unauthorized" });
+  if (AUTH_KEY) {
+    const header = req.headers.authorization;
+    if (!header || header !== `Bearer ${AUTH_KEY}`) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
   }
   next();
 }
 
-app.get("/sse", checkAuth, async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  sessions[transport.sessionId] = transport;
-  res.on("close", () => delete sessions[transport.sessionId]);
-  await server.connect(transport);
+async function handleMcp(req, res) {
+  const sessionId = req.headers["mcp-session-id"];
+  let transport;
+
+  if (sessionId && sessions.has(sessionId)) {
+    transport = sessions.get(sessionId);
+  } else if (!sessionId && req.method === "POST") {
+    transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (id) => {
+        sessions.set(id, transport);
+        transport.onclose = () => sessions.delete(id);
+      },
+    });
+    const s = new McpServer({ name: "agent-ads", version: "1.0.0" });
+    registerTools(s);
+    await s.connect(transport);
+  } else {
+    return res.status(400).json({ error: "Invalid or missing session" });
+  }
+
+  await transport.handleRequest(req, res, req.body);
+}
+
+app.post("/mcp", checkAuth, handleMcp);
+app.get("/mcp", checkAuth, handleMcp);
+app.delete("/mcp", checkAuth, (req, res) => {
+  const id = req.headers["mcp-session-id"];
+  if (id) sessions.delete(id);
+  res.status(200).json({ ok: true });
 });
 
-app.post("/messages", async (req, res) => {
-  const t = sessions[req.query.sessionId];
-  if (!t) return res.status(400).json({ error: "Unknown session" });
-  await t.handlePostMessage(req, res);
-});
-
-app.get("/health", (_, res) => res.json({ status: "ok" }));
-app.listen(PORT, () => console.log(`agent-ads MCP running on port ${PORT}`));
+app.get("/health", (_, res) => res.json({ status: "ok", sessions: sessions.size }));
+app.listen(PORT, () => console.log(`agent-ads MCP (Streamable HTTP) on port ${PORT}`));
