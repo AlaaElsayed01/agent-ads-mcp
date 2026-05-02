@@ -474,13 +474,20 @@ const clients = new Map();   // client_id -> { client_secret, redirect_uris }
 const authCodes = new Map(); // code -> { client_id, redirect_uri, code_challenge, expires }
 const tokens = new Map();    // access_token -> { client_id, expires }
 
+function getBaseUrl(req) {
+  const proto = req.headers["x-forwarded-proto"] || req.protocol;
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return process.env.SERVER_URL || `${proto}://${host}`;
+}
+
 // --- OAuth Metadata Discovery ---
-app.get("/.well-known/oauth-authorization-server", (_, res) => {
+app.get("/.well-known/oauth-authorization-server", (req, res) => {
+  const base = getBaseUrl(req);
   res.json({
-    issuer: SERVER_URL,
-    authorization_endpoint: `${SERVER_URL}/authorize`,
-    token_endpoint: `${SERVER_URL}/token`,
-    registration_endpoint: `${SERVER_URL}/register`,
+    issuer: base,
+    authorization_endpoint: `${base}/authorize`,
+    token_endpoint: `${base}/token`,
+    registration_endpoint: `${base}/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "client_credentials"],
     token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
