@@ -490,6 +490,20 @@ app.get("/.well-known/oauth-protected-resource", (req, res) => {
   });
 });
 
+app.get("/.well-known/openid-configuration", (req, res) => {
+  const base = getBaseUrl(req);
+  res.json({
+    issuer: base,
+    authorization_endpoint: `${base}/authorize`,
+    token_endpoint: `${base}/token`,
+    registration_endpoint: `${base}/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code", "client_credentials"],
+    token_endpoint_auth_methods_supported: ["client_secret_post", "none"],
+    code_challenge_methods_supported: ["S256"],
+  });
+});
+
 app.get("/.well-known/oauth-authorization-server", (req, res) => {
   const base = getBaseUrl(req);
   res.json({
@@ -574,14 +588,17 @@ app.post("/token", (req, res) => {
 
 // --- Auth Middleware ---
 function checkAuth(req, res, next) {
+  const base = getBaseUrl(req);
   const header = req.headers.authorization;
   if (!header || !header.startsWith("Bearer ")) {
+    res.set("WWW-Authenticate", `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`);
     return res.status(401).json({ error: "Unauthorized" });
   }
   const token = header.slice(7);
   const t = tokens.get(token);
   if (!t || t.expires < Date.now()) {
     tokens.delete(token);
+    res.set("WWW-Authenticate", `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`);
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
