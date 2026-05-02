@@ -1,8 +1,8 @@
 # 📡 agent-ads MCP Server
 
-> Query **Meta, Google, TikTok, Pinterest, LinkedIn & X** ad platforms from Claude Desktop and ChatGPT — powered by [agent-ads](https://agent-ads.dev).
+> Query **Meta, Google, TikTok, Pinterest, LinkedIn & X** ad platforms from Claude and ChatGPT — powered by [agent-ads](https://agent-ads.dev).
 
-An MCP (Model Context Protocol) server that wraps the `agent-ads` CLI so AI assistants can query your ad accounts using natural language. Deploy once on Render, connect from any MCP client.
+An MCP server that wraps the `agent-ads` CLI so AI assistants can query your ad accounts using natural language. Deploy once on Render, connect from any MCP client.
 
 **Read-only** — never creates, modifies, or deletes anything on your ad platforms.
 
@@ -19,7 +19,7 @@ An MCP (Model Context Protocol) server that wraps the `agent-ads` CLI so AI assi
      │  picks the right     │
      │  MCP tool + params   │
      └──────────┬───────────┘
-                │ SSE (MCP protocol)
+                │ Streamable HTTP + OAuth 2.1
                 ▼
      ┌──────────────────────┐
      │  MCP Server (Render) │
@@ -37,6 +37,33 @@ An MCP (Model Context Protocol) server that wraps the `agent-ads` CLI so AI assi
 ```
 
 You talk naturally. The AI picks the right tool. The server handles the rest.
+
+---
+
+## Authentication
+
+The server implements **OAuth 2.1** with a password-protected login page. This is what Claude and ChatGPT require for remote MCP servers.
+
+**How it works:**
+
+1. You add the MCP URL in Claude/ChatGPT
+2. The client auto-discovers OAuth endpoints and registers itself
+3. Your browser opens a **login page** asking for a password
+4. You enter the password you set on Render → connection approved
+5. The client gets a token (expires after 1 hour, auto-refreshes)
+
+**No password = no access.** Anyone without the password gets rejected.
+
+### OAuth Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/.well-known/oauth-authorization-server` | OAuth metadata discovery |
+| `/.well-known/oauth-protected-resource` | Protected resource metadata (RFC 9728) |
+| `/register` | Dynamic Client Registration (RFC 7591) |
+| `/authorize` | Login page → issues auth code |
+| `/token` | Exchanges code for Bearer token |
+| `/mcp` | MCP endpoint (protected) |
 
 ---
 
@@ -103,13 +130,17 @@ git clone https://github.com/AlaaElsayed01/agent-ads-mcp.git
 
 ### 3. Add environment variables
 
-Go to your Render service → **Environment** → add your auth key and platform tokens:
+Go to your Render service → **Environment**:
+
+#### Required
 
 | Variable | Purpose |
 |----------|---------|
-| `SERVER_URL` | **Required.** Your Render service URL, e.g. `https://agent-ads-mcp.onrender.com` |
+| `MCP_PASSWORD` | **Required.** Password for the login page when connecting from Claude/ChatGPT. Pick a strong password. |
 
-Then add tokens for the platforms you use:
+#### Ad Platform Tokens
+
+Add only the platforms you use:
 
 <details>
 <summary><strong>Meta</strong></summary>
@@ -181,58 +212,35 @@ Generate at [Graph API Explorer](https://developers.facebook.com/tools/explorer/
 | `X_ADS_DEFAULT_ACCOUNT_ID` | Optional |
 </details>
 
-> Only add the platforms you actually use.
-
 ### 4. Verify
 
 ```
 https://your-service.onrender.com/health
-→ {"status":"ok"}
+→ {"status":"ok","sessions":0}
 ```
 
 ---
 
-## Connect Claude Desktop
-
-### Option A: Connectors (recommended)
+## Connect Claude
 
 1. Go to [claude.ai](https://claude.ai) or open Claude Desktop
 2. **Settings** → **Connectors** → **Add custom connector**
 3. Enter URL: `https://your-service.onrender.com/mcp`
-4. Leave OAuth Client ID and Secret **empty** — the server uses Dynamic Client Registration (Claude handles it automatically)
-5. Click **Add** — Claude will complete the OAuth flow and connect
-
-### Option B: Developer config file
-
-Edit your config file:
-
-| OS | Path |
-|----|------|
-| Mac | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-
-```json
-{
-  "mcpServers": {
-    "agent-ads": {
-      "url": "https://your-service.onrender.com/mcp"
-    }
-  }
-}
-```
-
-Then quit Claude Desktop completely and reopen it.
+4. Leave OAuth Client ID and Secret **empty** (auto-registered)
+5. Click **Add**
+6. **Your browser opens a login page** → enter your `MCP_PASSWORD`
+7. Connected ✅
 
 ---
 
-## Connect ChatGPT Desktop
+## Connect ChatGPT
 
 > Requires Business, Enterprise, or Edu plan (MCP is in beta).
 
 1. ChatGPT → **Settings** → **Connected Apps**
 2. Add connector URL: `https://your-service.onrender.com/mcp`
-3. ChatGPT will auto-discover OAuth endpoints and complete the flow
-3. Use `@agent-ads` in chat or select from the **+** menu
+3. **Your browser opens a login page** → enter your `MCP_PASSWORD`
+4. Connected ✅ — use `@agent-ads` in chat or select from the **+** menu
 
 ---
 
@@ -257,10 +265,10 @@ Then quit Claude Desktop completely and reopen it.
 
 | Topic | Detail |
 |-------|--------|
-| **Security** | Read-only. OAuth 2.1 authentication required to connect. Dynamic Client Registration supported. Tokens expire after 1 hour. |
+| **Security** | OAuth 2.1 with password-protected login. Read-only. Tokens expire after 1 hour. |
 | **Token expiry** | Meta tokens can be short-lived. TikTok expires every 24h. Update in Render → Environment when needed. |
 | **Render free tier** | Sleeps after inactivity (~30s cold start). Starter plan ($7/mo) stays always-on. |
-| **No OS keychain** | Render/Docker has no keychain — tokens are read from environment variables automatically. |
+| **No OS keychain** | Render/Docker has no keychain — ad platform tokens are read from environment variables. |
 | **Upstream updates** | Uses `agent-ads` via npm — update by redeploying (picks up latest CLI version). |
 
 ---
@@ -269,7 +277,7 @@ Then quit Claude Desktop completely and reopen it.
 
 ```
 agent-ads-mcp/
-├── server.js        # MCP server: tools + command reference + SSE transport
+├── server.js        # MCP server: OAuth + tools + command reference + Streamable HTTP
 ├── package.json     # Dependencies
 ├── Dockerfile       # Container build for Render
 ├── render.yaml      # Render deployment config
